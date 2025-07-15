@@ -1,0 +1,142 @@
+#include "Common.hlsli"
+
+// ライト視点での深度と比較して影の部分を判定する関数
+float ShadowCalculation(float4 lightPos)
+{
+      // NDC → UV座標に変換
+    float3 projCoords = lightPos.xyz / lightPos.w;
+    projCoords = projCoords * 0.5f + 0.5f;
+
+    // Y軸反転が必要ならここで
+    projCoords.y = 1.0f - projCoords.y;
+
+    // UVが範囲外なら影を落とさない
+    if (projCoords.x < 0 || projCoords.x > 1 ||
+        projCoords.y < 0 || projCoords.y > 1 ||
+        projCoords.z < 0 || projCoords.z > 1)
+        return 1.0f;
+
+    // シャドウマップから比較用深度を取得
+    float shadowMapDepth = g_ShadowMap.Sample(g_SamplerShadow, projCoords.xy).r;
+
+    // シャドウバイアス（影のアーティファクトを防ぐための微調整）
+    float bias = 0.005f;
+
+    // 深度比較：ライト視点から見た奥行きと実際の奥行き
+    float shadow = projCoords.z - bias > shadowMapDepth ? 0.0f : 1.0f;
+
+    return shadow;
+}
+
+float4 main(PS_IN input) : SV_TARGET
+{
+    float4 color = float4(0, 0, 0, 1);
+    
+    // DEFAULT出力
+    if (TextureType == 0)
+    {
+        // 法線
+        float3 normal = g_Normal.Sample(g_SamplerState, input.uv);
+    
+	    // テクスチャから色を取得
+        float4 texColor = g_Texture.Sample(g_SamplerState, input.uv);
+
+        // 平行光源の有無で環境光が変化
+        float3 ambient = DLight.Enable ? DLight.Ambient : NightBright;
+        color.rgb += texColor.rgb * ambient;
+    
+        float3 N = normalize(normal); // 法線ベクトルを正規化
+        float3 V = normalize(Camera.eyePos - input.worldPos.xyz); // 視線ベクトルの正規化
+    
+        // 平行光源があった場合（昼表現）
+        if (DLight.Enable)
+        {
+            float3 L = normalize(-DLight.Direction.xyz); // ライトの方向を正規化
+            float3 R = reflect(-L, N); // 反射ベクトル
+
+         // 拡散反射光の計算
+            float diffuse = saturate(dot(N, L));
+
+        // シャドウの計算
+            float shadow;
+            if (isShadow)
+            {
+                shadow = ShadowCalculation(input.lightPos);
+            }
+            else
+            {
+                shadow = 1.0f;
+            }
+
+        
+        // 最終色の合成
+            color.rgb += texColor.rgb * diffuse * DLight.Diffuse.rgb * shadow;
+        }
+    
+        // 点光源
+        for (int i = 0; i < PLightNum; i++)
+        {
+            // 点光源があった場合
+            if (PLight[i].Enable)
+            {
+                float3 lightPos = PLight[i].Position.xyz; // ライトの座標
+                float3 L = normalize(lightPos - input.worldPos.xyz); // 光源ベクトル
+                float3 R = reflect(-L, N); // 反射ベクトル
+
+                float distance = length(lightPos - input.worldPos.xyz); // 光源との距離
+            
+            // 距離による減衰計算
+            // 一般式「1 / (a + b*d + c*d^2)」による現実の減衰
+                float a = PLight[i].Attenuation.x;
+                float b = PLight[i].Attenuation.y;
+                float c = PLight[i].Attenuation.z;
+                float attenuation = 1.0f / (a + b * distance + c * distance * distance);
+
+            // 拡散反射（ディフューズ）と鏡面反射（スペキュラ）の計算
+                float diffuse = saturate(dot(N, L));
+            //float specular = pow(saturate(dot(R, V)), shininess);
+
+                float3 lightColor = PLight[i].Diffuse * PLight[i].Intensity; // ライトの色
+            
+            // 点光源の影響を加算
+                color.rgb += texColor.rgb * (diffuse * lightColor * attenuation);
+
+            }
+        
+        }
+        
+    }
+    // Color出力
+    else if (TextureType == 1)
+    {
+        // カラーテクスチャをサンプリング
+        color = g_Texture.Sample(g_SamplerState, input.uv);
+        
+    }
+    // 法線出力
+    else if (TextureType == 2)
+    {
+        color = g_Normal.Sample(g_SamplerState, input.uv);
+        
+    }
+    // ワールド座標出力
+    else if (TextureType == 3)
+    {
+        // カラーテクスチャをサンプリング
+        color = g_World.Sample(g_SamplerState, input.uv);
+    }
+    // 深度情報出力
+    else if (TextureType == 4)
+    {
+        // 深度テクスチャをサンプリング
+        color = g_Depth.Sample(g_SamplerState, input.uv);
+    }
+    // 速度バッファ情報出力
+    else if (TextureType == 5)
+    {
+        // 速度バッファテクスチャをサンプリング
+        color = g_MVector.Sample(g_SamplerState, input.uv);
+    }
+    
+    return color;
+}
