@@ -1,0 +1,21 @@
+#include "Common.hlsli"
+
+
+float4 main(PS_IN input) : SV_TARGET
+{
+	
+    float4 color = g_Texture.Sample(g_SamplerState, input.uv);
+    
+    // ïΩçsåıåπÇìKóp
+    if (DLight.Enable)
+    {
+        color *= DLight.Diffuse;
+    }
+    else
+    {
+        color *= NightBright; // à√Ç≠Ç∑ÇÈ
+    }
+    
+    
+    return color;
+}
